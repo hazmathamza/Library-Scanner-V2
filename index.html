@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Library Management System</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://www.gstatic.com/firebasejs/10.0.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.0.0/firebase-firestore-compat.js"></script>
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .header {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      padding: 30px 40px;
+      border-radius: 20px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+      margin-bottom: 30px;
+    }
+
+    .header h1 {
+      font-size: 32px;
+      color: #1a202c;
+      margin-bottom: 10px;
+      font-weight: 700;
+    }
+
+    .header p {
+      color: #718096;
+      font-size: 16px;
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+      margin-bottom: 30px;
+    }
+
+    @media (max-width: 968px) {
+      .main-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 30px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    }
+
+    .card-title {
+      font-size: 24px;
+      color: #1a202c;
+      margin-bottom: 20px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .mode-selector {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 25px;
+    }
+
+    .mode-btn {
+      flex: 1;
+      padding: 15px 20px;
+      border: 2px solid #e2e8f0;
+      background: white;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .mode-btn:hover {
+      border-color: #0284c7;
+      transform: translateY(-2px);
+    }
+
+    .mode-btn.active {
+      background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%);
+      color: white;
+      border-color: transparent;
+      box-shadow: 0 4px 15px rgba(2, 132, 199, 0.4);
+    }
+
+    .input-group {
+      margin-bottom: 20px;
+    }
+
+    .input-group label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      color: #4a5568;
+      margin-bottom: 8px;
+    }
+
+    select, input[type="text"], input[type="number"] {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid #e2e8f0;
+      border-radius: 10px;
+      font-size: 15px;
+      transition: all 0.3s ease;
+      background: white;
+    }
+
+    select:focus, input:focus {
+      outline: none;
+      border-color: #0284c7;
+      box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.1);
+    }
+
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%);
+      color: white;
+      box-shadow: 0 4px 15px rgba(2, 132, 199, 0.3);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(2, 132, 199, 0.4);
+    }
+
+    .btn-secondary {
+      background: #f7fafc;
+      color: #4a5568;
+      border: 2px solid #e2e8f0;
+    }
+
+    .btn-secondary:hover {
+      background: #edf2f7;
+      border-color: #cbd5e0;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    #video {
+      width: 100%;
+      height: 300px;
+      border-radius: 15px;
+      background: #000;
+      object-fit: cover;
+      margin-bottom: 15px;
+    }
+
+    .scan-status {
+      padding: 15px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 500;
+      margin-top: 15px;
+      background: #f0f9ff;
+      color: #0c4a6e;
+      border-left: 4px solid #0284c7;
+      white-space: pre-line;
+    }
+
+    .scan-status.success {
+      background: #f0fdf4;
+      color: #166534;
+      border-left-color: #22c55e;
+    }
+
+    .scan-status.error {
+      background: #fef2f2;
+      color: #991b1b;
+      border-left-color: #ef4444;
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(5px);
+      z-index: 1000;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .modal-content {
+      background: white;
+      max-width: 600px;
+      margin: 50px auto;
+      border-radius: 20px;
+      padding: 30px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 25px;
+    }
+
+    .modal-title {
+      font-size: 24px;
+      font-weight: 700;
+      color: #1a202c;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      font-size: 28px;
+      color: #a0aec0;
+      cursor: pointer;
+      padding: 0;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      transition: all 0.2s;
+    }
+
+    .close-btn:hover {
+      background: #f7fafc;
+      color: #4a5568;
+    }
+
+    .checkout-list {
+      list-style: none;
+    }
+
+    .checkout-item {
+      padding: 20px;
+      margin-bottom: 15px;
+      background: linear-gradient(to right, #f0f9ff, #ffffff);
+      border-radius: 12px;
+      border-left: 4px solid #0ea5e9;
+      transition: all 0.3s ease;
+    }
+
+    .checkout-item:hover {
+      transform: translateX(5px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    .checkout-item.overdue {
+      background: linear-gradient(to right, #fef2f2, #ffffff);
+      border-left-color: #ef4444;
+    }
+
+    .checkout-item-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1a202c;
+      margin-bottom: 8px;
+    }
+
+    .checkout-item-details {
+      font-size: 14px;
+      color: #718096;
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .overdue-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: #fef2f2;
+      color: #991b1b;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-left: 10px;
+    }
+
+    .checkin-list {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .checkin-item {
+      padding: 15px;
+      background: #f7fafc;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: all 0.2s;
+    }
+
+    .checkin-item:hover {
+      background: #edf2f7;
+    }
+
+    .checkin-item input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+      accent-color: #0284c7;
+    }
+
+    .checkin-item label {
+      flex: 1;
+      cursor: pointer;
+      font-size: 15px;
+      color: #2d3748;
+      font-weight: 500;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #a0aec0;
+    }
+
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 15px;
+      opacity: 0.5;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+      margin-bottom: 25px;
+    }
+
+    .stat-card {
+      background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%);
+      padding: 20px;
+      border-radius: 12px;
+      color: white;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+
+    .stat-label {
+      font-size: 13px;
+      opacity: 0.9;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📚 Library Management System</h1>
+      <p>Scan student IDs to check books in and out</p>
+    </div>
+
+    <div class="main-grid">
+      <div class="card">
+        <h2 class="card-title">🎯 Scanner</h2>
+        
+        <div class="mode-selector">
+          <button class="mode-btn active" data-mode="checkout">
+            📤 Check Out
+          </button>
+          <button class="mode-btn" data-mode="checkin">
+            📥 Check In
+          </button>
+        </div>
+
+        <div class="input-group" id="bookSelectGroup">
+          <label>Select Book</label>
+          <select id="bookDropdown">
+            <option value="">Choose a book...</option>
+          </select>
+        </div>
+
+        <div class="btn-group">
+          <button class="btn btn-secondary" id="refreshBtn">🔄 Refresh Books</button>
+          <button class="btn btn-secondary" id="addBookBtn">➕ Add Book</button>
+        </div>
+
+        <video id="video" autoplay></video>
+        
+        <div id="output" class="scan-status">
+          Ready to scan student ID...
+        </div>
+
+        <div id="checkinOptions" style="display: none; margin-top: 20px;">
+          <h3 style="font-size: 18px; margin-bottom: 15px; color: #1a202c;">Select Books to Return</h3>
+          <div id="checkinForm" class="checkin-list"></div>
+          <button class="btn btn-primary" id="confirmCheckinBtn" style="width: 100%; margin-top: 15px;">
+            ✅ Confirm Check-In
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">📊 Active Checkouts</h2>
+        <div class="stats-grid" id="statsGrid">
+          <div class="stat-card">
+            <div class="stat-value" id="totalCheckouts">0</div>
+            <div class="stat-label">Active</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="overdueCount">0</div>
+            <div class="stat-label">Overdue</div>
+          </div>
+        </div>
+        <ul id="checkoutList" class="checkout-list"></ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Book Modal -->
+  <div id="addBookModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Add New Book</h3>
+        <button class="close-btn" id="closeModalBtn">×</button>
+      </div>
+      
+      <div class="input-group">
+        <label>Title</label>
+        <input type="text" id="newTitle" placeholder="Enter book title">
+      </div>
+
+      <div class="input-group">
+        <label>Author</label>
+        <input type="text" id="newAuthor" placeholder="Enter author name">
+      </div>
+
+      <div class="input-group">
+        <label>Genre</label>
+        <input type="text" id="newGenre" placeholder="Enter genre">
+      </div>
+
+      <div class="input-group">
+        <label>Total Copies</label>
+        <input type="number" id="newCopies" placeholder="Number of copies" min="1" value="1">
+      </div>
+
+      <button class="btn btn-primary" id="saveBookBtn" style="width: 100%;">
+        💾 Save Book
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // Initialize Firebase first
+    const firebaseConfig = {
+      apiKey: "AIzaSyD6h9XTa6g34s7DdmyJOeDUrAU-CcxNGdo",
+      authDomain: "library-system-61e86.firebaseapp.com",
+      projectId: "library-system-61e86",
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    
+    // Initialize global variables
+    let currentMode = 'checkout';
+    let cameraInitialized = false;
+
+    // Mode switching
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        currentMode = this.dataset.mode;
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        
+        const bookSelectGroup = document.getElementById('bookSelectGroup');
+        bookSelectGroup.style.display = currentMode === 'checkout' ? 'block' : 'none';
+        
+        document.getElementById('checkinOptions').style.display = 'none';
+        document.getElementById('output').className = 'scan-status';
+        document.getElementById('output').innerText = currentMode === 'checkout' 
+          ? 'Ready to scan student ID for checkout...'
+          : 'Ready to scan student ID for check-in...';
+      });
+    });
+
+    // Modal controls
+    document.getElementById('addBookBtn').addEventListener('click', function() {
+      document.getElementById('addBookModal').style.display = 'block';
+    });
+
+    document.getElementById('closeModalBtn').addEventListener('click', closeAddBookModal);
+
+    function closeAddBookModal() {
+      document.getElementById('addBookModal').style.display = 'none';
+      document.getElementById('newTitle').value = '';
+      document.getElementById('newAuthor').value = '';
+      document.getElementById('newGenre').value = '';
+      document.getElementById('newCopies').value = '1';
+    }
+
+    // Load books
+    document.getElementById('refreshBtn').addEventListener('click', loadBooks);
+
+    async function loadBooks() {
+      const dropdown = document.getElementById("bookDropdown");
+      dropdown.innerHTML = '<option value="">Choose a book...</option>';
+      const books = await db.collection("books").get();
+      books.forEach(doc => {
+        const book = doc.data();
+        const option = document.createElement("option");
+        option.value = doc.id;
+        option.text = `${book.title} by ${book.author} (${book.available_copies}/${book.total_copies} available)`;
+        option.disabled = book.available_copies <= 0;
+        dropdown.appendChild(option);
+      });
+    }
+
+    // Add new book
+    document.getElementById('saveBookBtn').addEventListener('click', addNewBook);
+
+    async function addNewBook() {
+      const title = document.getElementById("newTitle").value.trim();
+      const author = document.getElementById("newAuthor").value.trim();
+      const genre = document.getElementById("newGenre").value.trim();
+      const total_copies = parseInt(document.getElementById("newCopies").value);
+      
+      if (!title || !author || !genre || isNaN(total_copies) || total_copies < 1) {
+        alert("Please fill in all fields correctly.");
+        return;
+      }
+      
+      await db.collection("books").add({
+        title, author, genre,
+        total_copies,
+        available_copies: total_copies
+      });
+      
+      closeAddBookModal();
+      loadBooks();
+      
+      const output = document.getElementById('output');
+      output.className = 'scan-status success';
+      output.innerText = `✅ Book "${title}" has been added to the library!`;
+    }
+
+    // Load active checkouts
+    async function loadActiveCheckouts() {
+      const list = document.getElementById("checkoutList");
+      list.innerHTML = "";
+      const now = new Date();
+      const checkouts = await db.collection("checkouts").where("return_date", "==", null).get();
+
+      let totalCount = 0;
+      let overdueCount = 0;
+
+      if (checkouts.empty) {
+        list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><p>No active checkouts</p></div>';
+      } else {
+        for (const doc of checkouts.docs) {
+          const data = doc.data();
+          const bookDoc = await db.collection("books").doc(data.book_id).get();
+          const studentDoc = await db.collection("students").doc(data.student_id).get();
+          const bookTitle = bookDoc.exists ? bookDoc.data().title : "Unknown Book";
+          const studentName = studentDoc.exists ? studentDoc.data().name : "Unknown Student";
+          const dueDate = data.due_date?.toDate();
+          const isOverdue = dueDate && dueDate < now;
+
+          totalCount++;
+          if (isOverdue) overdueCount++;
+
+          const item = document.createElement("li");
+          item.className = `checkout-item ${isOverdue ? 'overdue' : ''}`;
+          item.innerHTML = `
+            <div class="checkout-item-title">
+              ${bookTitle}
+              ${isOverdue ? '<span class="overdue-badge">⚠️ Overdue</span>' : ''}
+            </div>
+            <div class="checkout-item-details">
+              <span>👤 ${studentName}</span>
+              <span>📅 Due: ${dueDate?.toLocaleDateString() || "N/A"}</span>
+            </div>
+          `;
+          list.appendChild(item);
+        }
+      }
+
+      document.getElementById('totalCheckouts').innerText = totalCount;
+      document.getElementById('overdueCount').innerText = overdueCount;
+    }
+
+    // Confirm check-in
+    document.getElementById('confirmCheckinBtn').addEventListener('click', confirmCheckin);
+
+    async function confirmCheckin() {
+      const selected = Array.from(document.querySelectorAll("#checkinForm input:checked"));
+      
+      if (selected.length === 0) {
+        alert("Please select at least one book to check in.");
+        return;
+      }
+
+      for (const checkbox of selected) {
+        const checkoutId = checkbox.value;
+        const bookId = checkbox.dataset.bookId;
+
+        await db.collection("checkouts").doc(checkoutId).update({
+          return_date: new Date()
+        });
+
+        await db.collection("books").doc(bookId).update({
+          available_copies: firebase.firestore.FieldValue.increment(1)
+        });
+      }
+
+      document.getElementById("checkinOptions").style.display = "none";
+      const output = document.getElementById("output");
+      output.className = 'scan-status success';
+      output.innerText = `✅ Successfully checked in ${selected.length} book${selected.length > 1 ? 's' : ''}!`;
+      
+      loadBooks();
+      loadActiveCheckouts();
+    }
+
+    // Initialize camera and barcode scanner
+    function initializeScanner() {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+        .then(stream => {
+          const video = document.getElementById('video');
+          video.srcObject = stream;
+          video.play();
+
+          const codeReader = new ZXing.BrowserBarcodeReader();
+          codeReader.decodeFromVideoDevice(null, 'video', async (result, err) => {
+            if (result) {
+              const barcodeValue = result.text;
+              const bookId = document.getElementById('bookDropdown').value;
+              const output = document.getElementById('output');
+              
+              output.className = 'scan-status';
+              output.innerText = `🔍 Scanning: ${barcodeValue}`;
+
+              const studentRef = db.collection("students").doc(barcodeValue);
+              const studentDoc = await studentRef.get();
+              
+              if (!studentDoc.exists) {
+                output.className = 'scan-status error';
+                output.innerText = `❌ Student ID not found: ${barcodeValue}`;
+                return;
+              }
+
+              const student = studentDoc.data();
+              output.innerText = `👤 Student: ${student.name}`;
+
+              if (currentMode === "checkout") {
+                if (!bookId) {
+                  output.className = 'scan-status error';
+                  output.innerText += `\n\n❌ Please select a book to check out.`;
+                  return;
+                }
+
+                const bookRef = db.collection("books").doc(bookId);
+                const bookDoc = await bookRef.get();
+                
+                if (!bookDoc.exists) {
+                  output.className = 'scan-status error';
+                  output.innerText += `\n\n❌ Book not found.`;
+                  return;
+                }
+
+                const book = bookDoc.data();
+                if (book.available_copies <= 0) {
+                  output.className = 'scan-status error';
+                  output.innerText += `\n\n❌ No copies of "${book.title}" are currently available.`;
+                  return;
+                }
+
+                const checkoutDate = new Date();
+                const dueDate = new Date();
+                dueDate.setDate(checkoutDate.getDate() + 14);
+
+                await db.collection("checkouts").add({
+                  student_id: barcodeValue,
+                  book_id: bookId,
+                  checkout_date: checkoutDate,
+                  due_date: dueDate,
+                  return_date: null
+                });
+
+                await bookRef.update({
+                  available_copies: book.available_copies - 1
+                });
+
+                output.className = 'scan-status success';
+                output.innerText += `\n\n✅ Successfully checked out "${book.title}"!\n📅 Due date: ${dueDate.toLocaleDateString()}`;
+                
+                loadBooks();
+                loadActiveCheckouts();
+              } else {
+                const checkouts = await db.collection("checkouts")
+                  .where("student_id", "==", barcodeValue)
+                  .where("return_date", "==", null)
+                  .get();
+
+                const form = document.getElementById("checkinForm");
+                form.innerHTML = "";
+
+                if (checkouts.empty) {
+                  output.className = 'scan-status success';
+                  output.innerText += `\n\n✅ ${student.name} has no books to return.`;
+                  document.getElementById("checkinOptions").style.display = "none";
+                  return;
+                }
+
+                for (const doc of checkouts.docs) {
+                  const data = doc.data();
+                  const bookDoc = await db.collection("books").doc(data.book_id).get();
+                  const bookTitle = bookDoc.exists ? bookDoc.data().title : "Unknown Book";
+
+                  const item = document.createElement("div");
+                  item.className = "checkin-item";
+                  
+                  const checkbox = document.createElement("input");
+                  checkbox.type = "checkbox";
+                  checkbox.id = `check-${doc.id}`;
+                  checkbox.value = doc.id;
+                  checkbox.dataset.bookId = data.book_id;
+                  
+                  const label = document.createElement("label");
+                  label.htmlFor = `check-${doc.id}`;
+                  label.textContent = bookTitle;
+                  
+                  item.appendChild(checkbox);
+                  item.appendChild(label);
+                  form.appendChild(item);
+                }
+
+                output.className = 'scan-status';
+                output.innerText += `\n\n📚 ${student.name} has ${checkouts.size} book${checkouts.size > 1 ? 's' : ''} checked out.\nSelect books to return below.`;
+                document.getElementById("checkinOptions").style.display = "block";
+              }
+            }
+          });
+        })
+        .catch(err => {
+          console.error("Camera access error:", err);
+          const output = document.getElementById('output');
+          output.className = 'scan-status error';
+          output.innerText = "❌ Camera access denied. Please enable camera permissions.";
+        });
+    }
+
+    // Modal click outside to close
+    document.getElementById('addBookModal').addEventListener('click', function(e) {
+      if (e.target === this) {
+        closeAddBookModal();
+      }
+    });
+
+    // Initialize on page load
+    window.addEventListener('load', function() {
+      loadBooks();
+      loadActiveCheckouts();
+      initializeScanner();
+      setInterval(loadActiveCheckouts, 30000);
+    });
+  </script>
+</body>
+</html>
