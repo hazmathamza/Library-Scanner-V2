@@ -312,7 +312,7 @@
         <h2 class="card-title">Active Checkouts</h2>
         <div class="stats-grid">
           <div class="stat-card"><div class="stat-value" id="totalCheckouts">0</div><div class="stat-label">Active</div></div>
-          <div class="stat-card"><div class="stat-value" id="overdueCount">0</div><div class="stat-label">Overdue</div></div>
+          <div class="stat-card"><div class="stat-value" id="overdueCount">0</div><div class="stat-label">Books</div></div>
         </div>
         <ul id="checkoutList" class="checkout-list"></ul>
       </div>
@@ -357,8 +357,9 @@
           </div>
           <div class="student-name" id="student-name"></div>
           <div class="student-meta">
-            ID <span class="mono" id="student-id"></span><br>
-            <span id="student-grade"></span>
+            ID <span class="mono" id="student-id"></span>
+            <span id="student-email-line" class="hidden"><br><span id="student-email"></span></span>
+            <span id="student-grade-line" class="hidden"><br><span id="student-grade"></span></span>
           </div>
         </div>
         <div class="purchase-panel">
@@ -402,6 +403,7 @@
     <div class="input-group"><label for="newTitle">Title</label><input type="text" id="newTitle" placeholder="Enter book title"></div>
     <div class="input-group"><label for="newAuthor">Author</label><input type="text" id="newAuthor" placeholder="Enter author name"></div>
     <div class="input-group"><label for="newGenre">Genre</label><input type="text" id="newGenre" placeholder="Enter genre"></div>
+    <div class="input-group"><label for="newBarcode">Barcode</label><input type="text" id="newBarcode" placeholder="Barcode on the book"></div>
     <div class="input-group"><label for="newCopies">Total Copies</label><input type="number" id="newCopies" placeholder="Number of copies" min="1" value="1"></div>
     <button class="btn btn-primary" id="saveBookBtn" style="width: 100%;" type="button">Save Book</button>
   </div>
@@ -486,9 +488,23 @@
   // Photo: uses photoUrl (or photo / imageUrl) when present, else a Storage
   // photoPath. No photo on file yet -> initials fallback, never an error.
   async function lookupStudent(id) {
-    const snap = await db.collection("students").doc(id).get();
-    if (!snap.exists) return null;
-    const data = snap.data() || {};
+    // Student records are keyed inconsistently in the live database: some
+    // use the barcode as the document ID, others use an auto-ID with the
+    // barcode in a `barcode_value` or `barcode` field. Try all three.
+    let data = null;
+    const byId = await db.collection("students").doc(id).get();
+    if (byId.exists) {
+      data = byId.data() || {};
+    } else {
+      const byValue = await db.collection("students").where("barcode_value", "==", id).limit(1).get();
+      if (!byValue.empty) {
+        data = byValue.docs[0].data() || {};
+      } else {
+        const byBarcode = await db.collection("students").where("barcode", "==", id).limit(1).get();
+        if (!byBarcode.empty) data = byBarcode.docs[0].data() || {};
+      }
+    }
+    if (!data) return null;
     let photoUrl = "";
     const urlFields = ["photoUrl", "photoURL", "photo", "imageUrl", "image"];
     for (const f of urlFields) {
@@ -498,7 +514,17 @@
       try { photoUrl = await firebase.storage().ref(data.photoPath).getDownloadURL(); }
       catch (e) { photoUrl = ""; }
     }
-    return { id: id, name: data.name || "Unknown", grade: data.grade || "", photoUrl: photoUrl };
+    return { id: id, name: data.name || "Unknown", email: data.email || "", grade: data.grade || "", photoUrl: photoUrl };
+  }
+
+  // Best-effort audit log, matching the existing activity_log convention.
+  // Never blocks the checkout/purchase if it fails.
+  function logActivity(action, details) {
+    db.collection("activity_log").add({
+      action: action,
+      details: details,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    }).catch((e) => console.warn("Activity log failed:", e));
   }
 
   // ---------- Top-level mode switching ----------
@@ -564,6 +590,7 @@
     $("newTitle").value = "";
     $("newAuthor").value = "";
     $("newGenre").value = "";
+    $("newBarcode").value = "";
     $("newCopies").value = "1";
   }
 
@@ -571,12 +598,22 @@
     const title = $("newTitle").value.trim();
     const author = $("newAuthor").value.trim();
     const genre = $("newGenre").value.trim();
+    const barcode = $("newBarcode").value.trim();
     const total_copies = parseInt($("newCopies").value, 10);
-    if (!title || !author || !genre || isNaN(total_copies) || total_copies < 1) {
+    if (!title || !author || !genre || !barcode || isNaN(total_copies) || total_copies < 1) {
       alert("Please fill in all fields correctly.");
       return;
     }
-    await db.collection("books").add({ title, author, genre, total_copies, available_copies: total_copies });
+    // Live books are keyed by barcode as the document ID.
+    const bookRef = db.collection("books").doc(barcode);
+    if ((await bookRef.get()).exists) {
+      alert("A book with this barcode already exists.");
+      return;
+    }
+    await bookRef.set({
+      title, author, barcode, total_copies, available_copies: total_copies,
+      genre: [genre], type: "Book"
+    });
     closeAddBookModal();
     loadBooks();
     setOutput('Book "' + title + '" has been added to the library!', "success");
@@ -586,34 +623,29 @@
   async function loadActiveCheckouts() {
     const list = $("checkoutList");
     list.innerHTML = "";
-    const now = new Date();
-    const checkouts = await db.collection("checkouts").where("return_date", "==", null).get();
-    let totalCount = 0, overdueCount = 0;
+    // Live schema: active = returned == false. Dates are ISO strings.
+    const checkouts = await db.collection("checkouts").where("returned", "==", false).get();
+    let totalCount = 0;
     if (checkouts.empty) {
       list.innerHTML = '<div class="empty-state">No active checkouts</div>';
     } else {
-      for (const doc of checkouts.docs) {
+      checkouts.forEach((doc) => {
         const data = doc.data();
-        const bookDoc = await db.collection("books").doc(data.book_id).get();
-        const studentDoc = await db.collection("students").doc(data.student_id).get();
-        const bookTitle = bookDoc.exists ? bookDoc.data().title : "Unknown Book";
-        const studentName = studentDoc.exists ? studentDoc.data().name : "Unknown Student";
-        const dueDate = data.due_date ? data.due_date.toDate() : null;
-        const isOverdue = dueDate && dueDate < now;
         totalCount++;
-        if (isOverdue) overdueCount++;
+        let dateText = "N/A";
+        try { dateText = new Date(data.checkout_date).toLocaleDateString(); } catch (e) { /* keep N/A */ }
         const item = document.createElement("li");
         item.className = "checkout-item";
         item.innerHTML =
-          '<div class="checkout-item-title">' + bookTitle +
-            (isOverdue ? '<span class="overdue-badge">Overdue</span>' : "") + "</div>" +
-          '<div class="checkout-item-details"><span>' + studentName + "</span><span>Due: " +
-            (dueDate ? dueDate.toLocaleDateString() : "N/A") + "</span></div>";
+          '<div class="checkout-item-title">' + (data.book_title || "Unknown Book") + "</div>" +
+          '<div class="checkout-item-details"><span>' + (data.student_name || "Unknown Student") +
+          "</span><span>Checked out: " + dateText + "</span></div>";
         list.appendChild(item);
-      }
+      });
     }
     $("totalCheckouts").innerText = totalCount;
-    $("overdueCount").innerText = overdueCount;
+    const booksSnap = await db.collection("books").get();
+    $("overdueCount").innerText = booksSnap.size;
   }
 
   // ---------- Library: check-in ----------
@@ -627,12 +659,22 @@
     }
     for (const checkbox of selected) {
       const checkoutId = checkbox.value;
-      const bookId = checkbox.dataset.bookId;
-      await db.collection("checkouts").doc(checkoutId).update({ return_date: new Date() });
-      await db.collection("books").doc(bookId).update({
-        available_copies: firebase.firestore.FieldValue.increment(1)
+      let bookId = checkbox.dataset.bookId;
+      if (!bookId && checkbox.dataset.isbn) {
+        const bq = await db.collection("books").where("isbn", "==", checkbox.dataset.isbn).limit(1).get();
+        if (!bq.empty) bookId = bq.docs[0].id;
+      }
+      await db.collection("checkouts").doc(checkoutId).update({
+        returned: true,
+        returned_at: new Date().toISOString()
       });
+      if (bookId) {
+        await db.collection("books").doc(bookId).update({
+          available_copies: firebase.firestore.FieldValue.increment(1)
+        });
+      }
     }
+    logActivity("Book Checked In", "Returned " + selected.length + " book" + (selected.length > 1 ? "s" : ""));
     $("checkinOptions").classList.add("hidden");
     setOutput("Successfully checked in " + selected.length + " book" + (selected.length > 1 ? "s" : "") + "!", "success");
     loadBooks();
@@ -668,24 +710,27 @@
         return;
       }
       const checkoutDate = new Date();
-      const dueDate = new Date();
-      dueDate.setDate(checkoutDate.getDate() + 14);
       await db.collection("checkouts").add({
-        student_id: barcodeValue,
         book_id: bookId,
-        checkout_date: checkoutDate,
-        due_date: dueDate,
-        return_date: null
+        book_isbn: book.isbn || "",
+        book_title: book.title,
+        checkout_date: checkoutDate.toISOString(),
+        returned: false,
+        returned_at: null,
+        student_email: student.email || "",
+        student_id: barcodeValue,
+        student_name: student.name
       });
       await bookRef.update({ available_copies: book.available_copies - 1 });
       scanLock = { code: barcodeValue, until: Date.now() + 5000 };
-      setOutput('Student: ' + student.name + '\n\nSuccessfully checked out "' + book.title + '"!\nDue date: ' + dueDate.toLocaleDateString(), "success");
+      logActivity("Book Checked Out", '"' + book.title + '" to ' + student.name);
+      setOutput('Student: ' + student.name + '\n\nSuccessfully checked out "' + book.title + '"!', "success");
       loadBooks();
       loadActiveCheckouts();
     } else {
       const checkouts = await db.collection("checkouts")
         .where("student_id", "==", barcodeValue)
-        .where("return_date", "==", null)
+        .where("returned", "==", false)
         .get();
       const form = $("checkinForm");
       form.innerHTML = "";
@@ -696,15 +741,15 @@
       }
       for (const doc of checkouts.docs) {
         const data = doc.data();
-        const bookDoc = await db.collection("books").doc(data.book_id).get();
-        const bookTitle = bookDoc.exists ? bookDoc.data().title : "Unknown Book";
+        const bookTitle = data.book_title || "Unknown Book";
         const item = document.createElement("div");
         item.className = "checkin-item";
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
         checkbox.id = "check-" + doc.id;
         checkbox.value = doc.id;
-        checkbox.dataset.bookId = data.book_id;
+        checkbox.dataset.bookId = data.book_id || "";
+        checkbox.dataset.isbn = data.book_isbn || "";
         const label = document.createElement("label");
         label.htmlFor = "check-" + doc.id;
         label.textContent = bookTitle;
@@ -749,7 +794,10 @@
   function renderStudent(s) {
     $("student-name").textContent = s.name;
     $("student-id").textContent = s.id;
+    $("student-email").textContent = s.email || "";
+    $("student-email-line").classList.toggle("hidden", !s.email);
     $("student-grade").textContent = s.grade || "";
+    $("student-grade-line").classList.toggle("hidden", !s.grade);
     const img = $("student-photo"), init = $("student-initials");
     if (s.photoUrl) {
       img.src = s.photoUrl;
@@ -838,10 +886,12 @@
       await db.collection("storePurchases").add({
         studentId: currentStudent.id,
         studentName: currentStudent.name,
+        studentEmail: currentStudent.email || "",
         items: items,
         total: total,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
+      logActivity("Store Purchase", currentStudent.name + " — " + money(total) + " (" + items.reduce((n, i) => n + i.qty, 0) + " item(s))");
       $("success-sub").textContent = currentStudent.name + " · " + items.reduce((n, i) => n + i.qty, 0) + " item(s)";
       $("success-total").textContent = money(total);
       $("success-overlay").classList.remove("hidden");
